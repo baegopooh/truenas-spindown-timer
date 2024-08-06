@@ -43,6 +43,7 @@ VERBOSE=0                  # Default verbosity level
 DRYRUN=0                   # Default for dryrun option
 SHUTDOWN_TIMEOUT=0         # Default shutdown timeout (0 == no shutdown)
 USE_SMARTCTL=0             # Default smartctl use 
+SKIP_NON_ROTATIONAL=0      # Default skip non-rotational
 declare -A DRIVES          # Associative array for detected drives
 declare -A ZFSPOOLS        # Array for monitored ZFS pools
 declare -A DRIVES_BY_POOLS # Associative array mapping of pool names to list of disk identifiers (e.g. poolname => "ada0 ada1 ada2")
@@ -100,6 +101,7 @@ Options:
   -d           : Dry run. No actual spindown is performed.
   -h           : Print this help message.
   -r           : Use Smartctl instead of hdparm for -C, -I
+  -n           : Skip non-rotational drives
 
 Example usage:
 $0
@@ -230,6 +232,7 @@ function populate_driveid_to_dev_array() {
     fi
 }
 
+
 ##
 # Registers a new drive in $DRIVES array and detects if it is an ATA or SCSI
 # drive.
@@ -264,6 +267,16 @@ function register_drive() {
 }
 
 ##
+# Determines whether the given drive $1 is a rotational drive, to skip spindown
+#
+# Arguments:
+#   $1 Device identifier of the drive
+##
+function is_rotational_drive() {
+    cat /sys/block/$1/queue/rotational
+}
+
+##
 # Detects all connected drives using plain iostat method and whether they are
 # ATA or SCSI drives. Drives listed in $IGNORE_DRIVES will be excluded.
 #
@@ -288,7 +301,12 @@ function detect_drives_disk() {
 
     # Detect protocol type (ATA or SCSI) for each drive and populate $DRIVES array
     for drive in ${DRIVE_IDS}; do
+        if [ $SKIP_NON_ROTATIONAL -eq 0 ] || { [ $SKIP_NON_ROTATIONAL -eq 1 ] && [[ $(is_rotational_drive $drive) -eq 1 ]]; }; then
+                log_verbose "-> Detected disk : $drive"
                 register_drive "$drive"
+            else
+                log_verbose "-> Skipping non-rotational disk : $drive"
+            fi
     done
 }
 
@@ -346,9 +364,12 @@ function detect_drives_zpool() {
             if [ -z "$driveid" ]; then
                 continue
             fi
-
+            if [ $SKIP_NON_ROTATIONAL -eq 0 ] || { [ $SKIP_NON_ROTATIONAL -eq 1 ] && [[ $(is_rotational_drive ${DRIVEID_TO_DEV[$driveid]}) -eq 1 ]]; }; then
                 log_verbose "-> Detected disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
                 register_drive "${DRIVEID_TO_DEV[$driveid]}"
+            else
+                log_verbose "-> Skipping non-rotational disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
+            fi
             DRIVES_BY_POOLS[$poolname]="${DRIVES_BY_POOLS[$poolname]} ${DRIVEID_TO_DEV[$driveid]}"
         done < <(echo "$disks" | tr -s "\\t" " " | cut -d ' ' -f2)
     done
@@ -634,7 +655,7 @@ function main() {
 }
 
 # Parse arguments
-while getopts ":hqvdmcrt:p:i:s:u:" opt; do
+while getopts ":hqvdmcrnt:p:i:s:u:" opt; do
   case ${opt} in
     t ) TIMEOUT=${OPTARG}
       ;;
@@ -657,6 +678,8 @@ while getopts ":hqvdmcrt:p:i:s:u:" opt; do
     u ) OPERATION_MODE=${OPTARG}
       ;;
     r ) USE_SMARTCTL=1
+      ;;
+    n ) SKIP_NON_ROTATIONAL=1
       ;;
     h ) print_usage; exit
       ;;
