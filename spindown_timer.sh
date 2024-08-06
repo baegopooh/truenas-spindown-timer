@@ -277,18 +277,18 @@ function detect_drives_disk() {
         # In manual mode the ignored drives become the explicitly monitored drives
         DRIVE_IDS=" ${IGNORED_DRIVES} "
     else
-        DRIVE_IDS=`iostat -x | grep -E '^(ada|da|sd)' | awk '{printf $1 " "}'`
+        DRIVE_IDS=$(iostat -x | grep -E '^(ada|da|sd)' | awk '{printf $1 " "}')
         DRIVE_IDS=" ${DRIVE_IDS} " # Space padding must be kept for pattern matching
 
         # Remove ignored drives
-        for drive in ${IGNORED_DRIVES[@]}; do
-            DRIVE_IDS=`sed "s/ ${drive} / /g" <<< ${DRIVE_IDS}`
+        for drive in "${IGNORED_DRIVES[@]}"; do
+            DRIVE_IDS=$(sed "s/ ${drive} / /g" <<< ${DRIVE_IDS})
         done
     fi
 
     # Detect protocol type (ATA or SCSI) for each drive and populate $DRIVES array
     for drive in ${DRIVE_IDS}; do
-        register_drive "$drive"
+                register_drive "$drive"
     done
 }
 
@@ -347,8 +347,8 @@ function detect_drives_zpool() {
                 continue
             fi
 
-            log_verbose "-> Detected disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
-            register_drive "${DRIVEID_TO_DEV[$driveid]}"
+                log_verbose "-> Detected disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
+                register_drive "${DRIVEID_TO_DEV[$driveid]}"
             DRIVES_BY_POOLS[$poolname]="${DRIVES_BY_POOLS[$poolname]} ${DRIVEID_TO_DEV[$driveid]}"
         done < <(echo "$disks" | tr -s "\\t" " " | cut -d ' ' -f2)
     done
@@ -408,7 +408,7 @@ function get_idle_drives() {
     # Remove active drives from list to get idle drives
     local IDLE_DRIVES=" $(get_drives) " # Space padding must be kept for pattern matching
     for drive in ${ACTIVE_DRIVES}; do
-        IDLE_DRIVES=`sed "s/ ${drive} / /g" <<< ${IDLE_DRIVES}`
+        IDLE_DRIVES=$(sed "s/ ${drive} / /g" <<< ${IDLE_DRIVES})
     done
 
     echo ${IDLE_DRIVES}
@@ -446,10 +446,6 @@ function all_drives_spundown() {
 
     return 0
 }
-
-
- 
-
 
 ##
 # Determines whether the given drive $1 understands ATA commands
@@ -528,7 +524,7 @@ function spindown_drive() {
                     hdparm -q -y "/dev/$1"
                 ;;
             esac
-
+            
             log "Spun down idle drive: $1"
         else
             log "Would spin down idle drive: $1. No spindown was performed (dry run)."
@@ -570,7 +566,7 @@ function main() {
     detect_driveid_type
     populate_driveid_to_dev_array
     detect_drives_$OPERATION_MODE
-    for drive in ${!DRIVES[@]}; do
+    for drive in "${!DRIVES[@]}"; do
         log_verbose "Detected drive ${drive} as ${DRIVES[$drive]} device"
     done
 
