@@ -326,7 +326,7 @@ function detect_drives_zpool() {
     fi
 
     # Index disks in detected pools
-    for poolname in ${ZFSPOOLS[*]}; do
+    for poolname in "${ZFSPOOLS[@]}"; do
         local disks
         if ! disks=$(zpool list -H -v "$poolname"); then
             log_error "Failed to get information for zfs pool: $poolname. Are you sure it exists?"
@@ -391,7 +391,7 @@ function get_idle_drives() {
         ;;
         "zpool")
             # Operation mode: zpool. Detect IO using zpool iostat
-            IOSTAT_OUTPUT=$(zpool iostat -H ${ZFSPOOLS[*]} $1 2)
+            IOSTAT_OUTPUT=$(zpool iostat -H "${ZFSPOOLS[@]}" $1 2)
 
             while read -r row; do
                 local poolname=$(echo "$row" | cut -d ' ' -f1)
