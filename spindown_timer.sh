@@ -58,7 +58,7 @@ OPERATION_MODE=disk        # Default operation mode (disk or zpool)
 function print_usage() {
     cat << EOF
 Usage:
-  $0 [-h] [-q] [-v] [-d] [-c] [-m] [-u <MODE>] [-t <TIMEOUT>] [-p <POLL_TIME>] [-i <DRIVE>] [-s <TIMEOUT>] [-r]
+  $0 [-h] [-q] [-v] [-d] [-c] [-m] [-u <MODE>] [-t <TIMEOUT>] [-p <POLL_TIME>] [-i <DRIVE>] [-s <TIMEOUT>] [-r] [-n]
 
 Monitors drive I/O and forces HDD spindown after a given idle period.
 Resistant to S.M.A.R.T. reads.
@@ -99,9 +99,9 @@ Options:
   -q           : Quiet mode. Outputs are suppressed set.
   -v           : Verbose mode. Prints additional information during execution.
   -d           : Dry run. No actual spindown is performed.
+  -r           : Use Smartctl instead of hdparm for -C and -I.
+  -n           : Skip non-rotational drives.
   -h           : Print this help message.
-  -r           : Use Smartctl instead of hdparm for -C, -I
-  -n           : Skip non-rotational drives
 
 Example usage:
 $0

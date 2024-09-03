@@ -28,7 +28,7 @@ disk temperature reads in newer versions of TrueNAS.
 
 Successfully tested on (most relevant):
   * **`TrueNAS-13.0-U5.1 (Core)`**
-  * **`TrueNAS SCALE 22.12.0`**
+  * **`TrueNAS SCALE 24.04.2`**
   * `TrueNAS-12.0 (Core)`
   * `FreeNAS-11.3`
 
@@ -92,10 +92,15 @@ Options:
                  CAUTION: This inverts the -i option, which can then be used to
                  manually supply drives or zfs pools to monitor. All other drives
                  or zfs pools will be ignored.
+  -c           : Check mode. Outputs drive power state after each POLL_TIME
+                 seconds.
   -q           : Quiet mode. Outputs are suppressed set.
   -v           : Verbose mode. Prints additional information during execution.
   -d           : Dry run. No actual spindown is performed.
+  -r           : Use Smartctl instead of hdparm for -C, -I
+  -n           : Skip non-rotational drives
   -h           : Print this help message.
+
 
 Example usage:
 spindown_timer.sh
@@ -365,6 +370,7 @@ This script was successfully tested on the following OS versions:
 * `FreeNAS-11.2-U4.1`
 
 ### TrueNAS SCALE
+* `TrueNAS SCALE 24.04.2`
 * `TrueNAS SCALE 22.12.0`
 * `TrueNAS SCALE 22.02.3`
 
