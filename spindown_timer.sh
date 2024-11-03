@@ -43,6 +43,7 @@ VERBOSE=0                  # Default verbosity level
 DRYRUN=0                   # Default for dryrun option
 SHUTDOWN_TIMEOUT=0         # Default shutdown timeout (0 == no shutdown)
 USE_SMARTCTL=0             # Default smartctl use 
+SKIP_NON_ROTATIONAL=0      # Default skip non-rotational
 declare -A DRIVES          # Associative array for detected drives
 declare -A ZFSPOOLS        # Array for monitored ZFS pools
 declare -A DRIVES_BY_POOLS # Associative array mapping of pool names to list of disk identifiers (e.g. poolname => "ada0 ada1 ada2")
@@ -57,7 +58,7 @@ OPERATION_MODE=disk        # Default operation mode (disk or zpool)
 function print_usage() {
     cat << EOF
 Usage:
-  $0 [-h] [-q] [-v] [-d] [-c] [-m] [-u <MODE>] [-t <TIMEOUT>] [-p <POLL_TIME>] [-i <DRIVE>] [-s <TIMEOUT>] [-r]
+  $0 [-h] [-q] [-v] [-d] [-c] [-m] [-u <MODE>] [-t <TIMEOUT>] [-p <POLL_TIME>] [-i <DRIVE>] [-s <TIMEOUT>] [-r] [-n]
 
 Monitors drive I/O and forces HDD spindown after a given idle period.
 Resistant to S.M.A.R.T. reads.
@@ -98,8 +99,9 @@ Options:
   -q           : Quiet mode. Outputs are suppressed set.
   -v           : Verbose mode. Prints additional information during execution.
   -d           : Dry run. No actual spindown is performed.
+  -r           : Use Smartctl instead of hdparm for -C and -I.
+  -n           : Skip non-rotational drives.
   -h           : Print this help message.
-  -r           : Use Smartctl instead of hdparm for -C, -I
 
 Example usage:
 $0
@@ -215,7 +217,7 @@ function populate_driveid_to_dev_array() {
             log_verbose "Creating disk to dev mapping using: partuuid"
             while read -r row; do
                 local partuuid=$(basename -- "${row}")
-                local dev=$(basename -- "$(readlink -f "${row}")" | sed "s/[0-9]\+$//")
+                local dev=$(basename -- "$(readlink -f "${row}")" | sed -e "s/[0-9]\+$//" -e "s/\(nvme[0-9n]\+\)p/\1/")
                 DRIVEID_TO_DEV[$partuuid]=$dev
             done < <(find /dev/disk/by-partuuid/ -type l)
         ;;
@@ -229,6 +231,7 @@ function populate_driveid_to_dev_array() {
         done
     fi
 }
+
 
 ##
 # Registers a new drive in $DRIVES array and detects if it is an ATA or SCSI
@@ -264,6 +267,16 @@ function register_drive() {
 }
 
 ##
+# Determines whether the given drive $1 is a rotational drive, to skip spindown
+#
+# Arguments:
+#   $1 Device identifier of the drive
+##
+function is_rotational_drive() {
+    cat /sys/block/$1/queue/rotational
+}
+
+##
 # Detects all connected drives using plain iostat method and whether they are
 # ATA or SCSI drives. Drives listed in $IGNORE_DRIVES will be excluded.
 #
@@ -277,18 +290,23 @@ function detect_drives_disk() {
         # In manual mode the ignored drives become the explicitly monitored drives
         DRIVE_IDS=" ${IGNORED_DRIVES} "
     else
-        DRIVE_IDS=`iostat -x | grep -E '^(ada|da|sd)' | awk '{printf $1 " "}'`
+        DRIVE_IDS=$(iostat -x | grep -E '^(ada|da|sd)' | awk '{printf $1 " "}')
         DRIVE_IDS=" ${DRIVE_IDS} " # Space padding must be kept for pattern matching
 
         # Remove ignored drives
-        for drive in ${IGNORED_DRIVES[@]}; do
-            DRIVE_IDS=`sed "s/ ${drive} / /g" <<< ${DRIVE_IDS}`
+        for drive in "${IGNORED_DRIVES[@]}"; do
+            DRIVE_IDS=$(sed "s/ ${drive} / /g" <<< ${DRIVE_IDS})
         done
     fi
 
     # Detect protocol type (ATA or SCSI) for each drive and populate $DRIVES array
     for drive in ${DRIVE_IDS}; do
-        register_drive "$drive"
+        if [ $SKIP_NON_ROTATIONAL -eq 0 ] || { [ $SKIP_NON_ROTATIONAL -eq 1 ] && [[ $(is_rotational_drive $drive) -eq 1 ]]; }; then
+                log_verbose "-> Detected disk : $drive"
+                register_drive "$drive"
+            else
+                log_verbose "-> Skipping non-rotational disk : $drive"
+            fi
     done
 }
 
@@ -326,7 +344,7 @@ function detect_drives_zpool() {
     fi
 
     # Index disks in detected pools
-    for poolname in ${ZFSPOOLS[*]}; do
+    for poolname in "${ZFSPOOLS[@]}"; do
         local disks
         if ! disks=$(zpool list -H -v "$poolname"); then
             log_error "Failed to get information for zfs pool: $poolname. Are you sure it exists?"
@@ -346,9 +364,12 @@ function detect_drives_zpool() {
             if [ -z "$driveid" ]; then
                 continue
             fi
-
-            log_verbose "-> Detected disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
-            register_drive "${DRIVEID_TO_DEV[$driveid]}"
+            if [ $SKIP_NON_ROTATIONAL -eq 0 ] || { [ $SKIP_NON_ROTATIONAL -eq 1 ] && [[ $(is_rotational_drive ${DRIVEID_TO_DEV[$driveid]}) -eq 1 ]]; }; then
+                log_verbose "-> Detected disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
+                register_drive "${DRIVEID_TO_DEV[$driveid]}"
+            else
+                log_verbose "-> Skipping non-rotational disk in pool $poolname: ${DRIVEID_TO_DEV[$driveid]} ($driveid)"
+            fi
             DRIVES_BY_POOLS[$poolname]="${DRIVES_BY_POOLS[$poolname]} ${DRIVEID_TO_DEV[$driveid]}"
         done < <(echo "$disks" | tr -s "\\t" " " | cut -d ' ' -f2)
     done
@@ -391,7 +412,7 @@ function get_idle_drives() {
         ;;
         "zpool")
             # Operation mode: zpool. Detect IO using zpool iostat
-            IOSTAT_OUTPUT=$(zpool iostat -H ${ZFSPOOLS[*]} $1 2)
+            IOSTAT_OUTPUT=$(zpool iostat -H "${ZFSPOOLS[@]}" $1 2)
 
             while read -r row; do
                 local poolname=$(echo "$row" | cut -d ' ' -f1)
@@ -408,7 +429,7 @@ function get_idle_drives() {
     # Remove active drives from list to get idle drives
     local IDLE_DRIVES=" $(get_drives) " # Space padding must be kept for pattern matching
     for drive in ${ACTIVE_DRIVES}; do
-        IDLE_DRIVES=`sed "s/ ${drive} / /g" <<< ${IDLE_DRIVES}`
+        IDLE_DRIVES=$(sed "s/ ${drive} / /g" <<< ${IDLE_DRIVES})
     done
 
     echo ${IDLE_DRIVES}
@@ -446,10 +467,6 @@ function all_drives_spundown() {
 
     return 0
 }
-
-
- 
-
 
 ##
 # Determines whether the given drive $1 understands ATA commands
@@ -528,7 +545,7 @@ function spindown_drive() {
                     hdparm -q -y "/dev/$1"
                 ;;
             esac
-
+            
             log "Spun down idle drive: $1"
         else
             log "Would spin down idle drive: $1. No spindown was performed (dry run)."
@@ -570,7 +587,7 @@ function main() {
     detect_driveid_type
     populate_driveid_to_dev_array
     detect_drives_$OPERATION_MODE
-    for drive in ${!DRIVES[@]}; do
+    for drive in "${!DRIVES[@]}"; do
         log_verbose "Detected drive ${drive} as ${DRIVES[$drive]} device"
     done
 
@@ -638,7 +655,7 @@ function main() {
 }
 
 # Parse arguments
-while getopts ":hqvdmcrt:p:i:s:u:" opt; do
+while getopts ":hqvdmcrnt:p:i:s:u:" opt; do
   case ${opt} in
     t ) TIMEOUT=${OPTARG}
       ;;
@@ -661,6 +678,8 @@ while getopts ":hqvdmcrt:p:i:s:u:" opt; do
     u ) OPERATION_MODE=${OPTARG}
       ;;
     r ) USE_SMARTCTL=1
+      ;;
+    n ) SKIP_NON_ROTATIONAL=1
       ;;
     h ) print_usage; exit
       ;;
